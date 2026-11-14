@@ -743,7 +743,8 @@ $('#signInBtn').addEventListener('click',async()=>{
   const p=new firebase.auth.GoogleAuthProvider(); p.setCustomParameters({hd:'whitepalmrealestate.com',prompt:'select_account'});
   try{await auth.signInWithPopup(p)}
   catch(e){
-    if(e&&(e.code==='auth/popup-blocked'||e.code==='auth/operation-not-supported-in-this-environment')){try{await auth.signInWithRedirect(p)}catch(e2){gate(true,e2.message)}}
+    if(e&&e.code==='auth/popup-blocked'){gate(true,'Your browser blocked the Google sign-in window. Allow pop-ups for this site, then tap Sign in again.')}
+    else if(e&&e.code==='auth/operation-not-supported-in-this-environment'){gate(true,'Open this link in Chrome or Safari (not inside WhatsApp or another app) and sign in again.')}
     else if(e&&e.code!=='auth/popup-closed-by-user'&&e.code!=='auth/cancelled-popup-request') gate(true,e.message);
   }
 });
