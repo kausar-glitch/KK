@@ -530,6 +530,7 @@ function renderLeads(){
       <button class="ghost w" data-delagent="${esc(a.id)}">Remove</button></div>`}).join(''):'<div class="muted small">No agents yet.</div>';
 
   fillAgentSelect($('#assignSel'), [['rr','Split evenly between agents'],['','Leave unassigned'], ...S.agents.map(a=>[a.id,a.name])]);
+  if(!$('#assignSel').dataset.i){$('#assignSel').dataset.i='1';$('#assignSel').value='rr'}
   fillAgentSelect($('#fAgent'), [['*','All agents'],['','Unassigned'], ...S.agents.map(a=>[a.id,a.name])]);
   if(!$('#fAgent').dataset.i){$('#fAgent').dataset.i='1';$('#fAgent').value='*'}
   fillAgentSelect($('#fStatus'), [['*','Any status'], ...Object.entries(STATUS).map(([k,s])=>[k,s.label])]);
