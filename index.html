@@ -214,6 +214,7 @@ body.mode-admin nav{margin-left:0}
         <input id="agentEmail" type="email" placeholder="kashin@whitepalmrealestate.com" style="flex:1.4;min-width:190px">
         <button class="pri" type="submit">Add agent</button>
       </form>
+      <button id="teamBtn" class="pri" style="margin-top:12px;display:none;width:100%"></button>
       <div id="agentList" class="agentlist"></div>
     </div>
     <div class="card w">
@@ -494,7 +495,26 @@ function renderAgent(){
   $('#queue').innerHTML=html||'<div class="empty">No leads waiting. Nice work — ask Kausar for more.</div>';
 }
 
+const TEAM=[['Noor','noor'],['Vishal','vishal'],['Raza','raza'],['Enjy','enjy'],['Abu','abu'],['Rajesh','sales'],['Kashin','kashin']].map(([n,e])=>({name:n,email:e+'@whitepalmrealestate.com'}));
+function teamTodo(){return TEAM.filter(t=>!S.agents.some(a=>(a.email||'').toLowerCase()===t.email))}
+function renderTeamBtn(){const todo=teamTodo();const b=$('#teamBtn');if(!canAdmin||!S.loaded.agents||!todo.length){b.style.display='none';return}
+  b.style.display='block';b.textContent='Set up team: '+todo.map(t=>t.name).join(', ');}
+async function setupTeam(){
+  const b=$('#teamBtn');b.disabled=true;
+  for(const t of teamTodo()){
+    const ex=S.agents.find(a=>(a.name||'').toLowerCase()===t.name.toLowerCase());
+    if(ex){
+      if(!await save(()=>db.doc('agents/'+ex.id).update({email:t.email})))break;
+      const mine=S.leads.filter(l=>l.agentId===ex.id);
+      for(let i=0;i<mine.length;i+=400){const bt=db.batch();mine.slice(i,i+400).forEach(l=>bt.update(db.doc('leads/'+l.id),{agentEmail:t.email}));if(!await save(()=>bt.commit()))break}
+    } else {
+      if(!await save(()=>db.collection('agents').doc().set({name:t.name,slug:slugify(t.name),email:t.email,createdAt:Date.now()})))break;
+    }
+  }
+  b.disabled=false;toast('Team set up');
+}
 function renderTeamLinks(){
+  renderTeamBtn();
   const row=(who,url,cls)=>`<div class="lk ${cls||''}"><span class="who">${esc(who)}</span><code>${esc(url)}</code><button data-copy="${esc(url)}">Copy link</button><a href="${esc(url)}" target="_blank" rel="noopener">Open</a></div>`;
   const missing=S.agents.filter(a=>!a.email).map(a=>a.name);
   $('#teamLinks').innerHTML=row('👥 Agents',BASE_URL)+row('📺 Live board',BASE_URL+'#board','board')+(missing.length?`<div class="small" style="color:var(--red)">Add an email for: ${esc(missing.join(', '))} — they can't see their leads until you do.</div>`:'');
@@ -688,6 +708,7 @@ $('#csvFile').addEventListener('change',async e=>{
 });
 $('#importBtn').addEventListener('click',importLeads);
 $('#splitBtn').addEventListener('click',splitUnassigned);
+$('#teamBtn').addEventListener('click',setupTeam);
 $('#wipeBtn').addEventListener('click',async e=>{
   const btn=e.currentTarget; if(!armed(btn)) return;
   btn.disabled=true; const msg=$('#wipeMsg'); msg.textContent='Preparing…';
