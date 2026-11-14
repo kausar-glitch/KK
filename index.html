@@ -210,7 +210,8 @@ body.mode-admin nav{margin-left:0}
     <div class="card">
       <h3>Agents</h3>
       <form id="agentForm" class="row w">
-        <input id="agentName" placeholder="Agent name, e.g. Kashin" style="flex:1;min-width:160px" maxlength="60">
+        <input id="agentName" placeholder="Name, e.g. Kashin" style="flex:1;min-width:120px" maxlength="60">
+        <input id="agentEmail" type="email" placeholder="kashin@whitepalmrealestate.com" style="flex:1.4;min-width:190px">
         <button class="pri" type="submit">Add agent</button>
       </form>
       <div id="agentList" class="agentlist"></div>
@@ -230,7 +231,7 @@ body.mode-admin nav{margin-left:0}
   </div>
   <div class="card" style="margin-top:14px">
     <h3>Team links</h3>
-    <p class="hint">Send each agent their own link — it opens straight to their call list. Open the live board link on a TV or monitor. Everyone signs in once with their White Palm Google account.</p>
+    <p class="hint">Every agent uses the same link and signs in with their White Palm Google account — they only ever see the leads assigned to them. Only you see all leads. Open the live board on a TV signed in as you or info@.</p>
     <div id="teamLinks" class="links"></div>
   </div>
   <div class="card" style="margin-top:14px">
@@ -276,7 +277,7 @@ const STALE_MIN = 45;
 
 /* ---------- state ---------- */
 const S = { agents:[], leads:[], calls:[], loaded:{agents:false,leads:false,calls:false}, me:lsGet('wp_agent')||'', view:'live', note:'' };
-let db=null, auth=null, canWrite=true, canAdmin=false, started=false, callsDay=null, unsubCalls=null, lastCallSig='';
+let db=null, auth=null, canWrite=true, canAdmin=false, ROLE='', ME_EMAIL='', started=false, callsDay=null, unsubCalls=null, lastCallSig='';
 
 /* ---------- utils ---------- */
 const $ = s => document.querySelector(s);
@@ -301,6 +302,7 @@ function normPhone(raw){
   if(s.length===9 && s[0]==='5') return '+971'+s;
   return s;
 }
+function emailOf(id){const a=S.agents.find(a=>a.id===id);return a&&a.email?a.email.toLowerCase():''}
 function agentName(id){const a=S.agents.find(a=>a.id===id);return a?a.name:''}
 function isLive(c){return c.state==='dialing'||c.state==='connected'}
 
@@ -323,7 +325,9 @@ function slugOf(a){return a.slug||slugify(a.name)}
 function route(){
   const v=(location.hash||'#live').slice(1);
   S.lock='';S.mode='admin';
-  if(v.startsWith('agent-')){S.view='agent';S.mode='agent';S.lock=v.slice(6)}
+  if(ROLE==='agent'){S.view='agent';S.mode='agent'}
+  else if(ROLE==='board'){S.view='live';S.mode='board'}
+  else if(v.startsWith('agent-')){S.view='agent';S.mode='agent';S.lock=v.slice(6)}
   else if(v==='board'){S.view='live';S.mode='board'}
   else S.view=['live','agent','leads'].includes(v)?v:'live';
   document.body.classList.toggle('mode-agent',S.mode==='agent');
@@ -397,8 +401,8 @@ function renderLive(){
     const status=act?(act.state==='connected'?'<span class="pill g"><span class="pulse"></span>On call</span>':'<span class="pill a">Dialing</span>'):'<span class="pill">Idle</span>';
     return {a,s,status,left,act};
   }).sort((x,y)=>(y.act?1:0)-(x.act?1:0)||y.s.total-x.s.total);
-  $('#agentTable').innerHTML=S.agents.length?`<table class="tbl"><thead><tr><th>Agent</th><th>Status</th><th>Calls</th><th>Connected</th><th>Interested</th><th>Talk time</th><th>Leads left</th></tr></thead><tbody>${
-    rows.map(r=>`<tr><td><b>${esc(r.a.name)}</b></td><td>${r.status}</td><td class="num">${r.s.total}</td><td class="num">${r.s.conn}</td><td class="num">${r.s.interested}</td><td class="num">${fmtTalk(r.s.talk)}</td><td class="num">${r.left}</td></tr>`).join('')
+  $('#agentTable').innerHTML=S.agents.length?`<table class="tbl"><thead><tr><th>Agent</th><th>Status</th><th>Calls</th><th>Connected</th><th>Interested</th><th>Talk time</th>${canAdmin?'<th>Leads left</th>':''}</tr></thead><tbody>${
+    rows.map(r=>`<tr><td><b>${esc(r.a.name)}</b></td><td>${r.status}</td><td class="num">${r.s.total}</td><td class="num">${r.s.conn}</td><td class="num">${r.s.interested}</td><td class="num">${fmtTalk(r.s.talk)}</td>${canAdmin?`<td class="num">${r.left}</td>`:''}</tr>`).join('')
   }</tbody></table>`:'<div class="empty">No agents yet — add them under <a href="#leads">Leads &amp; agents</a>.</div>';
 
   const ended=calls.filter(c=>c.state==='ended').sort((a,b)=>(b.endedAt||0)-(a.endedAt||0)).slice(0,30);
@@ -414,7 +418,16 @@ function fillAgentSelect(sel, opts){
 }
 
 function renderAgent(){
-  if(S.lock){
+  if(ROLE==='agent'){
+    const a=S.agents.find(a=>(a.email||'').toLowerCase()===ME_EMAIL);
+    S.me=a?a.id:'';
+    $('#hello').textContent=a?('Hi '+a.name+' 👋'):'';
+    if(!a){
+      $('#myStats').innerHTML='';$('#agentCall').innerHTML='';$('#queueCount').textContent='';lastCallSig='';
+      $('#queue').innerHTML=S.loaded.agents?'<div class="empty">Your account ('+esc(ME_EMAIL)+') isn\'t set up as an agent yet. Ask Kausar to add your email.</div>':'<div class="empty">Loading…</div>';
+      return;
+    }
+  } else if(S.lock){
     const a=S.agents.find(a=>slugOf(a)===S.lock);
     S.me=a?a.id:'';
     $('#hello').textContent=a?('Hi '+a.name+' 👋'):'';
@@ -482,15 +495,19 @@ function renderAgent(){
 }
 
 function renderTeamLinks(){
-  const row=(who,hash,cls)=>{const url=BASE_URL+'#'+hash;return `<div class="lk ${cls||''}"><span class="who">${esc(who)}</span><code>${esc(url)}</code><button data-copy="${esc(url)}">Copy link</button><a href="${esc(url)}" target="_blank" rel="noopener">Open</a></div>`};
-  $('#teamLinks').innerHTML=row('📺 Live board','board','board')+(S.agents.length?S.agents.map(a=>row(a.name,'agent-'+slugOf(a))).join(''):'<div class="muted small">Add agents above to get their links.</div>');
+  const row=(who,url,cls)=>`<div class="lk ${cls||''}"><span class="who">${esc(who)}</span><code>${esc(url)}</code><button data-copy="${esc(url)}">Copy link</button><a href="${esc(url)}" target="_blank" rel="noopener">Open</a></div>`;
+  const missing=S.agents.filter(a=>!a.email).map(a=>a.name);
+  $('#teamLinks').innerHTML=row('👥 Agents',BASE_URL)+row('📺 Live board',BASE_URL+'#board','board')+(missing.length?`<div class="small" style="color:var(--red)">Add an email for: ${esc(missing.join(', '))} — they can't see their leads until you do.</div>`:'');
 }
 function renderLeads(){
   renderTeamLinks();
   // agents list
-  $('#agentList').innerHTML=S.agents.length?S.agents.map(a=>{
+  const focused=document.activeElement&&document.activeElement.dataset&&document.activeElement.dataset.email;
+  if(!focused) $('#agentList').innerHTML=S.agents.length?S.agents.map(a=>{
     const n=S.leads.filter(l=>l.agentId===a.id).length;
-    return `<div class="ar"><div><b>${esc(a.name)}</b> <span class="muted small">${n} lead${n===1?'':'s'}</span></div><button class="ghost w" data-delagent="${esc(a.id)}">Remove</button></div>`}).join(''):'<div class="muted small">No agents yet.</div>';
+    return `<div class="ar" style="flex-wrap:wrap;gap:8px"><div style="min-width:110px"><b>${esc(a.name)}</b> <span class="muted small">${n} lead${n===1?'':'s'}</span></div>
+      <input data-email="${esc(a.id)}" value="${esc(a.email||'')}" placeholder="name@whitepalmrealestate.com" style="flex:1;min-width:190px;padding:6px 9px;font-size:13px${a.email?'':';border-color:var(--red)'}">
+      <button class="ghost w" data-delagent="${esc(a.id)}">Remove</button></div>`}).join(''):'<div class="muted small">No agents yet.</div>';
 
   fillAgentSelect($('#assignSel'), [['rr','Split evenly between agents'],['','Leave unassigned'], ...S.agents.map(a=>[a.id,a.name])]);
   fillAgentSelect($('#fAgent'), [['*','All agents'],['','Unassigned'], ...S.agents.map(a=>[a.id,a.name])]);
@@ -523,7 +540,7 @@ async function startCall(leadId){
   if(!lead||!me) return;
   const now=Date.now(); const ref=db.collection('calls').doc();
   S.note='';
-  const ok=await save(()=>ref.set({leadId,leadName:lead.name||'',leadPhone:lead.phone||'',agentId:me.id,agentName:me.name,state:'dialing',startedAt:now,day:dayKey(now),prevStatus:lead.status||'new'}));
+  const ok=await save(()=>ref.set({leadId,leadName:lead.name||'',leadPhone:lead.phone||'',agentId:me.id,agentEmail:(me.email||'').toLowerCase(),agentName:me.name,state:'dialing',startedAt:now,day:dayKey(now),prevStatus:lead.status||'new'}));
   if(ok) await save(()=>db.doc('leads/'+leadId).update({status:'calling',currentCallId:ref.id}));
 }
 async function markConnected(){
@@ -605,7 +622,7 @@ async function importLeads(){
       let agentId='';
       if(mode==='rr'){agentId=agents.reduce((m,a)=>load[a.id]<load[m.id]?a:m,agents[0]).id;load[agentId]++}
       else agentId=mode;
-      b.set(db.doc('leads/'+l.id),{name:l.name,phone:l.phone,notes:l.notes,agentId,status:'new',attempts:0,createdAt:base+done+chunk.indexOf(l),lastCallAt:null,lastNote:'',currentCallId:null});
+      b.set(db.doc('leads/'+l.id),{name:l.name,phone:l.phone,notes:l.notes,agentId,agentEmail:emailOf(agentId),status:'new',attempts:0,createdAt:base+done+chunk.indexOf(l),lastCallAt:null,lastNote:'',currentCallId:null});
     }
     const ok=await save(()=>b.commit()); if(!ok) break;
     done+=chunk.length; msg.textContent=`Importing… ${done}/${fresh.length}`;
@@ -619,7 +636,7 @@ async function splitUnassigned(){
   const un=S.leads.filter(l=>!l.agentId||!agents.some(a=>a.id===l.agentId));
   const load=Object.fromEntries(agents.map(a=>[a.id,S.leads.filter(l=>l.agentId===a.id).length]));
   $('#splitBtn').disabled=true; let n=0;
-  for(const l of un){const id=agents.reduce((m,a)=>load[a.id]<load[m.id]?a:m,agents[0]).id;load[id]++;if(!await save(()=>db.doc('leads/'+l.id).update({agentId:id})))break;n++}
+  for(const l of un){const id=agents.reduce((m,a)=>load[a.id]<load[m.id]?a:m,agents[0]).id;load[id]++;if(!await save(()=>db.doc('leads/'+l.id).update({agentId:id,agentEmail:emailOf(id)})))break;n++}
   toast(`Assigned ${n} lead${n===1?'':'s'}`);
 }
 function armed(btn){ // two-tap confirm
@@ -648,7 +665,7 @@ document.addEventListener('click',async e=>{
   if(t.dataset.dellead){if(!armed(t))return;await save(()=>db.doc('leads/'+t.dataset.dellead).delete());return}
   if(t.dataset.delagent){
     if(!armed(t))return;const id=t.dataset.delagent;
-    for(const l of S.leads.filter(l=>l.agentId===id)) await save(()=>db.doc('leads/'+l.id).update({agentId:''}));
+    for(const l of S.leads.filter(l=>l.agentId===id)) await save(()=>db.doc('leads/'+l.id).update({agentId:'',agentEmail:''}));
     await save(()=>db.doc('agents/'+id).delete());
     toast('Agent removed — their leads are now unassigned');return;
   }
@@ -656,11 +673,13 @@ document.addEventListener('click',async e=>{
 document.addEventListener('input',e=>{if(e.target.id==='callNote')S.note=e.target.value});
 $('#meSel').addEventListener('change',e=>{S.me=e.target.value;lsSet('wp_agent',S.me);lastCallSig='';render()});
 $('#agentForm').addEventListener('submit',async e=>{
-  e.preventDefault();const name=$('#agentName').value.trim();if(!name)return;
+  e.preventDefault();const name=$('#agentName').value.trim();const email=$('#agentEmail').value.trim().toLowerCase();if(!name)return;
+  if(!DOMAIN.test(email)){toast('Add their @whitepalmrealestate.com email');return}
+  if(S.agents.some(a=>(a.email||'').toLowerCase()===email)){toast('That email is already used');return}
   if(S.agents.some(a=>a.name.toLowerCase()===name.toLowerCase())){toast('That agent already exists');return}
   let slug=slugify(name),n=2;const taken=new Set(S.agents.map(slugOf));while(taken.has(slug)){slug=slugify(name)+'-'+n++}
-  const ok=await save(()=>db.collection('agents').doc().set({name,slug,createdAt:Date.now()}));
-  if(ok){$('#agentName').value='';toast(name+' added')}
+  const ok=await save(()=>db.collection('agents').doc().set({name,slug,email,createdAt:Date.now()}));
+  if(ok){$('#agentName').value='';$('#agentEmail').value='';toast(name+' added')}
 });
 $('#csvFile').addEventListener('change',async e=>{
   const f=e.target.files[0]; if(!f){fileText='';return}
@@ -685,8 +704,18 @@ $('#wipeBtn').addEventListener('click',async e=>{
 });
 ['leadSearch','fAgent','fStatus'].forEach(id=>$('#'+id).addEventListener(id==='leadSearch'?'input':'change',()=>renderLeads()));
 document.addEventListener('change',async e=>{
+  const aid=e.target.dataset&&e.target.dataset.email;
+  if(aid){
+    const em=e.target.value.trim().toLowerCase();
+    if(em&&!DOMAIN.test(em)){toast('Use a @whitepalmrealestate.com email');return}
+    if(em&&S.agents.some(a=>a.id!==aid&&(a.email||'').toLowerCase()===em)){toast('Another agent already has that email');return}
+    if(!await save(()=>db.doc('agents/'+aid).update({email:em}))) return;
+    const mine=S.leads.filter(l=>l.agentId===aid);
+    for(let i=0;i<mine.length;i+=400){const bt=db.batch();mine.slice(i,i+400).forEach(l=>bt.update(db.doc('leads/'+l.id),{agentEmail:em}));if(!await save(()=>bt.commit()))return}
+    toast('Email saved'+(mine.length?` — ${mine.length} leads updated`:''));e.target.blur();renderLeads();return;
+  }
   const id=e.target.dataset&&e.target.dataset.reassign; if(!id) return;
-  const ok=await save(()=>db.doc('leads/'+id).update({agentId:e.target.value}));
+  const ok=await save(()=>db.doc('leads/'+id).update({agentId:e.target.value,agentEmail:emailOf(e.target.value)}));
   if(ok) toast('Reassigned');
 });
 
@@ -707,13 +736,15 @@ function docs(s){return s.docs.map(d=>Object.assign({id:d.id},d.data()))}
 function subCalls(){
   if(unsubCalls) unsubCalls();
   callsDay=dayKey(Date.now());
-  unsubCalls=db.collection('calls').where('day','==',callsDay).onSnapshot(s=>{S.calls=docs(s);S.loaded.calls=true;loadedCheck();render()},onErr);
+  let q=db.collection('calls').where('day','==',callsDay);
+  if(ROLE==='agent') q=q.where('agentEmail','==',ME_EMAIL);
+  unsubCalls=q.onSnapshot(s=>{S.calls=docs(s);S.loaded.calls=true;loadedCheck();render()},onErr);
 }
 function loadedCheck(){if(S.loaded.agents&&S.loaded.leads&&S.loaded.calls&&$('#banner .warn')&&/connecting/.test($('#banner').textContent))banner('')}
 
 const FIREBASE_CONFIG={apiKey:"AIzaSyD9xZleRuNgZMaccdYU-8RYFCEIw7LFV20",authDomain:"white-palm-call-center.firebaseapp.com",projectId:"white-palm-call-center",storageBucket:"white-palm-call-center.firebasestorage.app",messagingSenderId:"893132461044",appId:"1:893132461044:web:817432bef2ab2d23dadfa1"};
 const DOMAIN=/@whitepalmrealestate\.com$/i;
-const ADMINS=['kausar@whitepalmrealestate.com','info@whitepalmrealestate.com'];
+const ADMIN_EMAIL='kausar@whitepalmrealestate.com', BOARD_EMAIL='info@whitepalmrealestate.com';
 route();
 window.addEventListener('hashchange',route);
 $('#gateLogo').src=document.querySelector('.brand .logo').src;
@@ -722,7 +753,9 @@ function startData(){
   if(started) return; started=true;
   const slow=setTimeout(()=>{if(!(S.loaded.agents&&S.loaded.leads&&S.loaded.calls))banner('Still connecting… check your internet connection.','warn')},10000);
   db.collection('agents').onSnapshot(s=>{S.agents=docs(s).sort((a,b)=>(a.name||'').localeCompare(b.name||''));S.loaded.agents=true;loadedCheck();render()},onErr);
-  db.collection('leads').onSnapshot(s=>{S.leads=docs(s);S.loaded.leads=true;loadedCheck();render()},onErr);
+  if(ROLE==='admin') db.collection('leads').onSnapshot(s=>{S.leads=docs(s);S.loaded.leads=true;loadedCheck();render()},onErr);
+  else if(ROLE==='agent') db.collection('leads').where('agentEmail','==',ME_EMAIL).onSnapshot(s=>{S.leads=docs(s);S.loaded.leads=true;loadedCheck();render()},onErr);
+  else {S.leads=[];S.loaded.leads=true}
   subCalls();
   const iv=setInterval(()=>{if(S.loaded.agents&&S.loaded.leads&&S.loaded.calls){clearTimeout(slow);clearInterval(iv);banner('')}},300);
 }
@@ -734,7 +767,9 @@ try{
     if(!u){gate(true);$('#whoami').innerHTML='';return}
     if(!DOMAIN.test(u.email||'')){gate(true,'That account ('+u.email+') isn\'t a White Palm account. Use your @whitepalmrealestate.com email.');auth.signOut();return}
     gate(false);
-    canAdmin=ADMINS.includes((u.email||'').toLowerCase());
+    ME_EMAIL=(u.email||'').toLowerCase();
+    ROLE=ME_EMAIL===ADMIN_EMAIL?'admin':ME_EMAIL===BOARD_EMAIL?'board':'agent';
+    canAdmin=ROLE==='admin'; document.body.classList.toggle('ro',!canAdmin&&ROLE!=='agent'); route();
     $('#whoami').innerHTML=`<span>${esc(u.email)}</span><button id="signOutBtn">Sign out</button>`;
     startData(); render();
   });
