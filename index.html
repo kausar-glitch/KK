@@ -142,6 +142,9 @@ a.callbtn:hover{background:#116c33}
 .agentlist{display:flex;flex-direction:column;gap:6px;margin-top:12px}
 .agentlist .ar{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border:1px solid var(--line);border-radius:10px}
 #leadTable select{padding:5px 8px;font-size:13px}
+.boardhead{display:none;align-items:center;gap:10px;font-weight:800;letter-spacing:2px;color:var(--green);font-size:15px;margin:2px 0 14px}
+body.mode-board .boardhead{display:flex}
+#boardClock{margin-left:auto;letter-spacing:0;color:var(--muted);font-weight:600}
 #gate{position:fixed;inset:0;z-index:30;background:var(--green);display:none;align-items:center;justify-content:center;padding:24px}
 #gate.on{display:flex}
 #gate .box{background:#fff;border-radius:20px;padding:30px 26px;max-width:380px;width:100%;text-align:center}
@@ -181,7 +184,15 @@ body.mode-admin nav{margin-left:0}
 <main>
 
 <!-- LIVE BOARD -->
+<section id="v-noaccess">
+  <div class="empty" style="margin-top:40px;padding:40px 20px">
+    <div style="font-size:20px;font-weight:800;color:var(--ink);margin-bottom:8px" id="naTitle">This page is for managers only</div>
+    <div id="naText">You're signed in as an agent. Your call list is on the agent page.</div>
+    <a href="./" class="callbtn" style="margin-top:18px">Go to my calls</a>
+  </div>
+</section>
 <section id="v-live">
+  <div class="boardhead"><span class="pulse" style="color:#4ade80"></span> LIVE BOARD <span id="boardClock"></span></div>
   <div class="stats" id="liveStats"></div>
   <h2><span class="pulse" style="color:var(--accent)"></span> Live calls</h2>
   <div id="liveCalls" class="grid"></div>
@@ -257,8 +268,8 @@ body.mode-admin nav{margin-left:0}
 <div id="toast"></div>
 <div id="gate"><div class="box">
   <img id="gateLogo" alt="White Palm">
-  <h1>White Palm Call Center</h1>
-  <p>Sign in with your White Palm Google account (@whitepalmrealestate.com).</p>
+  <h1 id="gateTitle">White Palm Call Center</h1>
+  <p id="gateText">Sign in with your White Palm Google account (@whitepalmrealestate.com).</p>
   <button class="pri" id="signInBtn"><svg width="18" height="18" viewBox="0 0 48 48"><path fill="#fff" d="M44.5 20H24v8.5h11.8C34.7 33.9 30.1 37 24 37c-7.2 0-13-5.8-13-13s5.8-13 13-13c3.1 0 5.9 1.1 8.1 2.9l6.4-6.4C34.6 4.1 29.6 2 24 2 11.8 2 2 11.8 2 24s9.8 22 22 22c11 0 21-8 21-22 0-1.3-.2-2.7-.5-4z"/></svg>Sign in with Google</button>
   <div id="gateErr"></div>
 </div></div>
@@ -326,7 +337,10 @@ function slugOf(a){return a.slug||slugify(a.name)}
 function route(){
   const v=(location.hash||'#live').slice(1);
   S.lock='';S.mode='admin';
-  if(ROLE==='agent'){S.view='agent';S.mode='agent'}
+  if(ROLE==='agent'&&(v==='board'||v==='leads'||v==='live')){S.view='noaccess';S.mode='agent';
+    $('#naTitle').textContent=v==='board'?'The live board is for managers only':'This page is for Kausar only';
+    $('#naText').textContent='You\'re signed in as '+ME_EMAIL+'. Your own leads and calls are on the agent page.'}
+  else if(ROLE==='agent'){S.view='agent';S.mode='agent'}
   else if(ROLE==='board'){S.view='live';S.mode='board'}
   else if(v.startsWith('agent-')){S.view='agent';S.mode='agent';S.lock=v.slice(6)}
   else if(v==='board'){S.view='live';S.mode='board'}
@@ -517,7 +531,10 @@ function renderTeamLinks(){
   renderTeamBtn();
   const row=(who,url,cls)=>`<div class="lk ${cls||''}"><span class="who">${esc(who)}</span><code>${esc(url)}</code><button data-copy="${esc(url)}">Copy link</button><a href="${esc(url)}" target="_blank" rel="noopener">Open</a></div>`;
   const missing=S.agents.filter(a=>!a.email).map(a=>a.name);
-  $('#teamLinks').innerHTML=row('👥 Agents',BASE_URL)+row('📺 Live board',BASE_URL+'#board','board')+(missing.length?`<div class="small" style="color:var(--red)">Add an email for: ${esc(missing.join(', '))} — they can't see their leads until you do.</div>`:'');
+  $('#teamLinks').innerHTML=row('👥 Agents',BASE_URL)+'<div class="muted small" style="margin:-2px 0 6px 4px">Send this to every agent. Each signs in with their own email and sees only their leads.</div>'
+    +row('📺 Live board',BASE_URL+'#board','board')+'<div class="muted small" style="margin:-2px 0 6px 4px">For the office TV. Sign in as you or info@ — agents can\'t open it.</div>'
+    +row('🔒 Admin',BASE_URL+'#leads')+'<div class="muted small" style="margin:-2px 0 6px 4px">Only you (kausar@) — upload leads, assign agents.</div>'
+    +(missing.length?`<div class="small" style="color:var(--red)">Add an email for: ${esc(missing.join(', '))} — they can't see their leads until you do.</div>`:'');
 }
 function renderLeads(){
   renderTeamLinks();
@@ -744,6 +761,7 @@ document.addEventListener('change',async e=>{
 /* ---------- live tick ---------- */
 setInterval(()=>{
   const now=Date.now();
+  const bc=$('#boardClock'); if(bc) bc.textContent=new Date(now).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
   document.querySelectorAll('.timer[data-t]').forEach(el=>{el.textContent=fmtDur((now-Number(el.dataset.t))/1000)});
   if(db && callsDay && dayKey(now)!==callsDay) subCalls();
 },1000);
@@ -770,7 +788,12 @@ const ADMIN_EMAIL='kausar@whitepalmrealestate.com', BOARD_EMAIL='info@whitepalmr
 route();
 window.addEventListener('hashchange',route);
 $('#gateLogo').src=document.querySelector('.brand .logo').src;
-function gate(on,err){$('#gate').classList.toggle('on',!!on);$('#gateErr').textContent=err||''}
+function gateText(){const v=(location.hash||'').slice(1);
+  if(v==='board'){$('#gateTitle').textContent='📺 Live Board';$('#gateText').textContent='Managers only. Sign in as kausar@ or info@whitepalmrealestate.com.'}
+  else if(v==='leads'){$('#gateTitle').textContent='Admin';$('#gateText').textContent='Kausar only. Sign in with kausar@whitepalmrealestate.com.'}
+  else {$('#gateTitle').textContent='Agent sign in';$('#gateText').textContent='Sign in with your own White Palm Google account (name@whitepalmrealestate.com) to see your leads.'}}
+window.addEventListener('hashchange',gateText);
+function gate(on,err){gateText();$('#gate').classList.toggle('on',!!on);$('#gateErr').textContent=err||''}
 function startData(){
   if(started) return; started=true;
   const slow=setTimeout(()=>{if(!(S.loaded.agents&&S.loaded.leads&&S.loaded.calls))banner('Still connecting… check your internet connection.','warn')},10000);
